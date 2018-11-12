@@ -258,6 +258,10 @@ app.controller('IdeCtrl',
         // if the language doesn't require compilation, e.g. Python, enable the html rendering of the output
         var lRenderOutputAsHTML = aRenderAsHtmlOutput || !($scope.isCompilationNeeded());
 
+        // newer versions of Docker changed websockets to send data in binary Blob format
+        // flag to enable support for Blob websocket data
+        var newDockerWSBinaryFormat = true;
+
         // clear the output
         setOutput('', lRenderOutputAsHTML);
 
@@ -282,20 +286,62 @@ app.controller('IdeCtrl',
 
         // Function to handle the event of the WS receiving data
         var onWSDataHandler = function(aNewlyReceivedData) {
+          if (newDockerWSBinaryFormat === true) {
+            // docker ws should be sending data as blob
+            if (aNewlyReceivedData instanceof Blob) {
 
-          var outputLength = addToOutput(aNewlyReceivedData, lRenderOutputAsHTML);
+              // every WSDataHandle event gets its own file reader because data blobs might come in too fast to reuse
+              // the same reader instance for several events
+              var fileReader = new FileReader();
 
-          // account for the number of messages
-          numOfMessages += 1;
-          //if(numOfMessages > maxNumOfMessages) {
-          if(outputLength > maxNumOfMessageCharacters) {
-            addToOutput("\n\nYour program output has more than " + maxNumOfMessageCharacters + " characters. That's quite a lot.\n" +
-              'For this reason, Codeboard has terminated your program.\n\n', lRenderOutputAsHTML);
+              console.log('Trying to process Blob');
 
-            WebsocketSrv.close(true);
+              // load event is fired when content read by filereader becomes available
+              fileReader.onload = function(event) {
+
+                console.log(fileReader.result);
+
+                var outputLength = addToOutput(fileReader.result, lRenderOutputAsHTML);
+                // account for the number of messages
+                numOfMessages += 1;
+                //if(numOfMessages > maxNumOfMessages) {
+                if(outputLength > maxNumOfMessageCharacters) {
+
+                  // TODO: we should call this after the close event of the websocket; otherwise this msg doesn't always show
+                  addToOutput("\n\nYour program output has more than " + maxNumOfMessageCharacters + " characters. That's quite a lot.\n" +
+                    'For this reason, Codeboard has terminated your program.\n\n', lRenderOutputAsHTML);
+
+                  WebsocketSrv.close(true);
+                }
+
+              };
+
+              fileReader.readAsText(aNewlyReceivedData);
+            }
+            else {
+
+              // TODO: testing thing for changing how Mantra handles WS
+              var outputLength = addToOutput(aNewlyReceivedData, lRenderOutputAsHTML);
+
+            }
           }
-        }
+   	   else {
+            // TODO: this entire else block can be removed when all Mantra uses Docker versions where WS use Blob data
+            var outputLength = addToOutput(aNewlyReceivedData, lRenderOutputAsHTML);
+            // account for the number of messages
+            numOfMessages += 1;
+            //if(numOfMessages > maxNumOfMessages) {
+            if(outputLength > maxNumOfMessageCharacters) {
 
+              // TODO: we should call this after the close event of the websocket; otherwise this msg doesn't always show
+              addToOutput("\n\nYour program output has more than " + maxNumOfMessageCharacters + " characters. That's quite a lot.\n" +
+                'For this reason, Codeboard has terminated your program.\n\n', lRenderOutputAsHTML);
+
+              WebsocketSrv.close(true);
+            }
+          }
+        };
+ 
         // Function to handle the event of the WS closing
         var onWSCloseCallback = function() {
           // if no message was added via WS, we set a message that the action completed
@@ -368,9 +414,8 @@ app.controller('IdeCtrl',
        * @return {number} the number of characters displayed in the output
        */
       var addToOutput = function(aOutputToAdd, renderAsHtml) {
-
+       
         $scope.renderHtmlOutput = false;
-
         if(renderAsHtml && !($scope.uiSettings.showOutputAsText)) {
 
           // get the current output and add the new output
@@ -422,9 +467,9 @@ app.controller('IdeCtrl',
 
             //
             ideState.stopUrl = data.stopUrl;
-
+            
             // the success case gives us a url to the Mantra WebSocket and a url how to start the container
-            displayWSOutputStream(data.streamUrl, data.startUrl);
+            displayWSOutputStream(data.streamUrl, data.startUrl);    
           },
           function (reason) {
             // the error callback
@@ -1413,7 +1458,7 @@ app.controller('IdeCtrl',
        * @return {boolean}
        */
       $scope.isEiffelLanguageCompatible = function() {
-        //console.log("Language "+ProjectFactory.getProject().language);
+        console.log("Language "+ProjectFactory.getProject().language);
         return ProjectFactory.getProject().language ==='Eiffel';
       };
 
@@ -1884,16 +1929,16 @@ app.controller('LibraryCtrl', ['$scope', '$rootScope', '$http', 'ProjectFactory'
   // fetch the list of files from the server
   var init = function() {
 
-    $http
-      .get('staticfiles/eiffelfiles.json')
-      .success(function(result) {
-
-        $scope.files = result;
-
-      })
-      .error(function(err) {
-        console.log(err);
-      })
+   // $http
+   //   .get('staticfiles/eiffelfiles.json')
+   //   .success(function(result) {
+   // 
+   //     $scope.files = result;
+   //
+   //   })
+   //   .error(function(err) {
+   //     console.log(err);
+   //   })
 
   }();
 
@@ -1911,24 +1956,24 @@ app.controller('LibraryCtrl', ['$scope', '$rootScope', '$http', 'ProjectFactory'
   }
 
 
-//  $scope.isEiffelLanguageCompatible = function() {
-//    //console.log("Language "+ProjectFactory.getProject().language);
-//    return ProjectFactory.getProject().language ==='Eiffel';
-//  }
+  $scope.isEiffelLanguageCompatible = function() {
+    console.log("Language "+ProjectFactory.getProject().language);
+    return ProjectFactory.getProject().language ==='Eiffel';
+  }
 
   /** Array that will have information about static files (i.e. the eiffelfiles.json file) */
   //var staticFiles = [];
 
   /** fetch the information about the static files */
   $scope.fetchStaticFiles = function() {
-    $http
-      .get('staticfiles/eiffelfiles.json')
-      .success(function(result) {
-        ProjectFactory.getProject().staticFiles = result;
-      })
-      .error(function(err) {
+    //$http
+    //  .get('staticfiles/eiffelfiles.json')
+    //  .success(function(result) {
+    //    ProjectFactory.getProject().staticFiles = result;
+    //  })
+    //  .error(function(err) {
 
-      })
+     // })
   }();
 
 }]);
